@@ -1,0 +1,106 @@
+---
+title: "Modeling - Standard Linear Regression"
+author: "Ben Steves"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output: 
+  pdf_document:
+    fig_height: 2.2
+    fig_width: 4
+  html_document:
+    fig_height: 2.2
+    fig_width: 4
+  word_document:
+    fig_height: 2.2
+    fig_width: 4
+---
+
+```{r, setup, include = FALSE}
+require(tidyverse)   # this loads mosaic, ggformula, etc. too
+require(ggformula)
+require(mosaic)
+require(glmmTMB)
+require(s245)
+require(DHARMa)
+library(rstan)
+require(dplyr)
+require(car)
+require(readxl)
+
+# Some customization.  You can alter or delete as desired (if you know what you are doing).
+
+theme_set(theme_bw(base_size=12))     # change theme for ggplot2/ggformula
+
+knitr::opts_chunk$set(
+  echo = TRUE,      # for homework, always show R code (this is the default)
+  tidy = FALSE,     # display code as typed (rather than reformatted)
+  size = "small",   # slightly smaller font for code
+  message = FALSE, warning = FALSE) # don't print warnings or messages in compiled document. So you MUST check them in RStudio!
+```
+
+Only analyzing the model that AIC in ArcPro said was best performing model, being the model with both predictors. 
+
+### Entering data:
+
+```{r}
+gwr <- read.csv("gwrdata.csv")
+```
+
+### Noise's effect of number of birds
+
+There doesn't seem to be a lot of correlation between more excessive noise and number of observed birds at a route. 
+
+```{r fig.width = 5, fig.height = 3}
+gf_point(log(MeanBirds) ~ NoiseMean, data = gwr, alpha = 0.7) %>%
+  gf_lims(x = c(0, 10)) %>%
+  gf_labs(x = "Average Noise per route, 2009-2019")
+```
+
+### Number of cars' effect on number of observed birds
+
+Same thing here, not much correlation between the variables
+
+```{r fig.width = 5, fig.height = 3}
+gf_point(log(MeanBirds) ~ CarMeanTotal, data = gwr, alpha = 0.7) %>%
+  gf_lims(x = c(0, 400)) %>%
+  gf_labs(x = "Average number of Cars observed per route, 2009-2019")
+```
+
+### Fitting model
+
+```{r}
+model <- glmmTMB(MeanBirds ~ 
+               NoiseMean + CarMeanTotal,
+                 data = gwr, family = nbinom1(link='log'))
+```
+
+### Confidence intervals of predictions (95% CI's)
+
+```{r}
+confint(model)
+```
+
+### Model coefficients
+
+The "conditional model" section from this output is the main part to look at. Next to the variable names are the predictions of the model. Noise predictions are near 0, and this is the same with car total. These are slopes, so the model doesn't think either has a big effect on the number of ducks seen at a route. 
+
+```{r}
+summary(model)
+```
+
+### Error variance plot
+
+There are issues with variance in the residuals plot - see report for more details. 
+
+```{r fig.wdith = 6, fig.height =4}
+sim_m1<- simulateResiduals(model)
+plotResiduals(sim_m1)
+```
+
+### Independence of Residuals
+
+Independence isn't a big issue with the model, also more in depth explained in the report.
+
+```{r fig.width = 6, fig.height = 4}
+s245::gf_acf(~model)
+```
+

@@ -1,0 +1,251 @@
+---
+title: "Data Cleaning - GIS Final Project"
+author: "Ben Steves"
+date: "4/26/2021"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+require(mosaic)
+require(tidyverse)
+```
+
+This is all of the data transforming that I did, mostly prior to doing any maps. I added in the vehicles dataset after I finished my IDW and LPI methods, though. 
+
+
+### Read in data
+
+Route data
+
+```{r}
+routes <- read.csv("https://docs.google.com/spreadsheets/d/e/2PACX-1vRcpyEUb1ZT5UaGkvlIeRpjgzebye5ZYN4yFfuzxUUJiif5z8LD9UlEH0REXyJkctL9rDTSr8o4BVlG/pub?output=csv")
+```
+
+State observation data
+
+```{r}
+michigan <- read.csv("Michiga.csv")
+illinois <- read.csv("Illinoi.csv")
+indiana <- read.csv("Indiana.csv")
+ohio <- read.csv("Ohio.csv")
+wisconsin <- read.csv("Wiscons.csv")
+```
+
+Vehicle noise and car total data
+
+```{r}
+vehicles <- read.csv("VehicleData.csv")
+```
+
+```{r}
+#migrants <- read.csv("MigrantSummary.csv")
+```
+
+
+### Renaming variables
+
+States were coded into the dataset as numbers, so I made new variable for state name that wasn't a number.
+
+```{r}
+routes <- routes %>%
+ # mutate(StateNum == as.character(StateNum)) %>%
+  mutate(StateName = case_when(
+    StateNum == 49 ~ "MI",
+    StateNum == 34 ~ "IL",
+    StateNum == 35 ~ "IN",
+    StateNum == 66 ~ "OH",
+    StateNum == 91 ~ "WI"
+  )) %>%
+  filter(StateName %in% c("IL", "IN", "MI", "OH", "WI"))
+```
+
+### Put all states data into one mega-dataset
+
+```{r}
+midwest <- ohio %>%
+  bind_rows(wisconsin) %>%
+  bind_rows(michigan) %>%
+  bind_rows(illinois) %>%
+  bind_rows(indiana)
+```
+
+### Looking to see which birds have most observations
+
+Only printed first 6 values from data
+
+```{r}
+midwest %>%
+  filter(AOU %in% 1000:2000) %>%
+  select(AOU, SpeciesTotal) %>%
+  group_by(AOU) %>%
+  summarize(n = sum(SpeciesTotal)) %>%
+  arrange(desc(n)) %>% head(6)
+```
+
+The dataset had tons of birds, but all of the waterfowl had AOU species numbers from 1000-2000, which were values that I needed. Metadata shows all of the species and their AOU values, but from the birds I'm looking at:
+
+Canada goose - 1720
+Wood duck - 1440
+Mute swan - 1782
+Mallard - 1320
+Blue winged teal - 1400
+Common Merganser - 1290
+
+```{r}
+# michigan %>%
+#   filter(AOU == 1290) %>%
+#   filter(Year == 2000) %>%
+#   select(AOU, SpeciesTotal) %>%
+#   summarize(n = sum(SpeciesTotal))
+```
+
+### Creating new index variables for birds, and adding new variable for actual name. 
+
+```{r}
+midwest <- midwest %>%
+  filter(AOU %in% c(1320, 1290, 1400, 1440, 1720, 1782)) %>%  
+  mutate(AOU_idx = case_when(
+    AOU == 1320 ~ 1,
+    AOU == 1290 ~ 2,
+    AOU == 1400 ~ 3,
+    AOU == 1440 ~ 4,
+    AOU == 1720 ~ 5,
+    AOU == 1782 ~ 6
+  )) %>%
+  mutate(SpeciesName = case_when(
+    AOU_idx == 1 ~ "Mallard",
+    AOU_idx == 2 ~ "Common Merganser",
+    AOU_idx == 3 ~ "Blue Winged Teal",
+    AOU_idx == 4 ~ "Wood Duck",
+    AOU_idx == 5 ~ "Canada Goose",
+    AOU_idx == 6 ~ "Mute Swan"
+  ))
+```
+
+### Changing states to text in midwest dataset as well, so I can easily merge it with routes.csv
+
+```{r}
+midwest <- midwest %>%
+  #mutate(StateNumChar == as.character(StateNum)) %>%
+  mutate(StateName = case_when(
+    StateNum == 49 ~ "MI",
+    StateNum == 34 ~ "IL",
+    StateNum == 35 ~ "IN",
+    StateNum == 66 ~ "OH",
+    StateNum == 91 ~ "WI"
+  )) %>%
+  filter(StateName %in% c("IL", "IN", "MI", "OH", "WI"))
+```
+
+### Filtering only years from 2009-2019 and summing the number of birds by species
+
+This is what I originally did for my IDW
+
+```{r}
+midwest_2009_2019 <- midwest %>%
+  filter(Year %in% 2009:2019) %>%
+  group_by(Route, StateName, SpeciesName, AOU_idx) %>%
+  summarize(n = sum(SpeciesTotal))
+```
+
+### Filtering only years from 2009-2019 and averaging the number of birds by species
+
+Improved for my LPI, using means number of birds at a route for all years 2009-2019. 
+
+```{r}
+means_midwest_2009_2019 <- midwest %>%
+  filter(Year %in% 2009:2019) %>%
+  group_by(Route, StateName, SpeciesName, AOU_idx) %>%
+  summarize(MeanBirds = mean(SpeciesTotal))
+```
+
+### Joining datasets
+
+Joining the states datasets with the routes datasets. Links the bird observation data from the states datasets with the geospatial elements of routes dataset. 
+
+```{r}
+mean_routes_joined <- means_midwest_2009_2019 %>%
+    left_join(routes, by = c("Route", "StateName"))
+```
+
+```{r}
+routes_joined <- midwest_2009_2019 %>%
+  left_join(routes, by = c("Route", "StateName"))
+```
+
+### Working in vehicles dataset. 
+
+Exporting it to do some extra cleaning in excel, where I calculate the total cars seen per route and the number of routes that had excessive noise. Filtered only for years 2009-2019 as well. 
+
+```{r}
+vehicles <- vehicles %>%
+  filter(StateNum %in% c(49, 34, 35, 66, 91)) %>%
+  filter(Year %in% 2009:2019)
+```
+
+```{r}
+write.csv(vehicles, file = "vehicles_nosum.csv")
+```
+
+```{r}
+vehicles_sums <- read.csv("vehicles_consumz.csv")
+```
+
+###Changing states to text in vehicles dataset as well
+
+```{r}
+vehicles_sums <- vehicles_sums %>%
+  #mutate(StateNumChar == as.character(StateNum)) %>%
+  mutate(StateName = case_when(
+    StateNum == 49 ~ "MI",
+    StateNum == 34 ~ "IL",
+    StateNum == 35 ~ "IN",
+    StateNum == 66 ~ "OH",
+    StateNum == 91 ~ "WI"
+  ))
+```
+
+### Calculate mean total number of cars, averaged across years 2009-2019
+
+```{r}
+vehicles_means <- vehicles_sums %>%
+ group_by(Route, StateName) %>%
+  summarize(CarMeanTotal = mean(CarTotal))
+```
+
+### Calculate mean noise levels, averaged across years 2009-2019
+
+```{r}
+noise_means <- vehicles_sums %>%
+  group_by(Route, StateName) %>%
+  summarize(NoiseMean = mean(NoiseTotal))
+```
+
+### Joining noise and car data
+
+```{r}
+means_joined <- noise_means %>%
+  left_join(vehicles_means, by = c("Route", "StateName"))
+```
+
+### Joining vehicle and route/observation data
+
+```{r}
+fullData <- mean_routes_joined %>%
+  left_join(means_joined, by = c("Route", "StateName"))
+```
+
+### Exporting data for use in GWR
+
+```{r}
+write.csv(fullData, file = "gwrdata.csv")
+```
+
+
+
+
+
+
